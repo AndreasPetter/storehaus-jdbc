@@ -1,6 +1,6 @@
 # storehaus-jdbc
 
-https://travis-ci.org/AndreasPetter/storehaus-jdbc.svg
+[![Build Status](https://travis-ci.org/AndreasPetter/storehaus-jdbc.svg?branch=master)](https://travis-ci.org/AndreasPetter/storehaus-jdbc)
 
 A Storehaus (http://twitter/storehaus) implementation that supports all kinds of JDBC databases, based on ScalikeJDBC, see http://scalikejdbc.org/
 
