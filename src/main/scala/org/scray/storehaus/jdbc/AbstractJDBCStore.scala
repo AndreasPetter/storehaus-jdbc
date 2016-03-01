@@ -28,7 +28,8 @@ abstract class AbstractJDBCStore[K, V](
       with IterableStore[K, V]
       with LazyLogging {
   
-  def filterName(name: String) = name.filterNot { x => x == '"' || x == '`' || x == ''' || x == ';'}
+  // filter, MSSQL ([]), MySQL (`), and various ticks
+  def filterName(name: String) = name.filterNot { x => x == '"' || x == '`' || x == ''' || x == ';' || x == '[' || x == ']'}
   
   val cleanedTableName = filterName(table)
   
@@ -96,7 +97,6 @@ abstract class AbstractJDBCStore[K, V](
    * TODO: improve creation of iterators further.
    */
   protected def executeQuery(query: Option[SQLSyntax] = None): Iterator[(K, V)] = {
-    val sqlsdf = sqls"test"
     var nextElement: Option[(K, V)] = None
     var oldToggle: Boolean = true
     var toggle: Boolean = true

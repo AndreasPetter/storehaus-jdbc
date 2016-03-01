@@ -35,6 +35,11 @@ import scala.util.Random
 import com.twitter.util.Future
 import com.twitter.concurrent.Spool
 import scala.annotation.tailrec
+import shapeless._
+// import shapeless.ops.traversable._
+import shapeless.syntax.std.traversable._
+import shapeless.ops.traversable._
+import HandleComposites._
 
 /**
  * Tests for the JDBCRowStore
@@ -44,6 +49,9 @@ import scala.annotation.tailrec
 @RunWith(classOf[JUnitRunner])
 class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
 
+  type KEY_TYPE = String :: Int :: HNil
+  type SERIALIZER_TYPE = TypeBinder[String] :: TypeBinder[Int] :: HNil
+  val serializers = implicitly[TypeBinder[String]] :: implicitly[TypeBinder[Int]] :: HNil
   
   lazy val sinleconn = {
     ConnectionPool.singleton("jdbc:h2:" + System.getProperty("user.home") + "/storehaus-jdbc/bla.db", "user", "pass")
@@ -67,6 +75,7 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
       db autoCommit {
         implicit session =>
         sql"CREATE TABLE BLA (key VARCHAR(200) PRIMARY KEY, BLUBBERWUBBER INTEGER, WURZ VARCHAR(50))".execute().apply()
+        sql"CREATE TABLE BLUBB (KEY VARCHAR(200), BLUBBERWUBBER INTEGER, WURZ VARCHAR(50), PRIMARY KEY (KEY, BLUBBERWUBBER))".execute().apply()
       }
     }
   }
@@ -75,7 +84,11 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
     Await.result(store.put(("Test", None)))
   }
   
-  "JDBC-Row-Store" should {
+  def internalDelete(store: JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE]) = {
+    Await.result(store.put(("Test" :: 1 :: HNil, None)))
+  }
+
+  "Single key JDBC-Row-Store" should {
     
     "instantiate JDBC-Row-Store" in {
       
@@ -103,7 +116,7 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
       jdbcStore.close()      
     }
     
-    "put (UPDATE) another row into JDBC-Row-Store" in {
+    "put (UPDATE) another row into the JDBC-Row-Store" in {
       // H2 doesn't allow to use the map feature, so we explicitly disable mapping
       val jdbcStore = new JDBCRowStore[String](sinleconn, "BLA", typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
       val key = "Test"
@@ -120,7 +133,7 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
       jdbcStore.close()      
     }
 
-    "put None (DELETE) into JDBC-Row-Store" in {
+    "put None (DELETE) into the JDBC-Row-Store" in {
       // H2 doesn't allow to use the map feature, so we explicitly disable mapping
       val jdbcStore = new JDBCRowStore[String](sinleconn, "BLA", typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
       val key = "Test"
@@ -165,10 +178,102 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
       println(System.currentTimeMillis() - t0)
       jdbcStore.close()
     }
-
-    
   }
 
+  "Multi-key JDBC-Row-Store" should {
+
+    
+    "instantiate JDBC-Row-Store" in {
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      assert(jdbcStore != null)
+      jdbcStore.close()
+    }
+    
+    "put (INSERT) and get some values into JDBC-Row-Store" in {
+      // H2 doesn't allow to use the map feature, so we explicitly disable mapping
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      val key = "Test" :: 1 :: HNil
+      val value0 = "KEY" -> "Test"
+      val value1 = "BLUBBERWUBBER" -> 1
+      val value2 = "WURZ" -> "blubb"
+      Await.result(jdbcStore.put((key, Some(Row(Map(value0, value1, value2))))))
+      assert(Await.result(jdbcStore.get(key)) === Some(Row(Map(value0, value1, value2))))
+      internalDelete(jdbcStore)
+      jdbcStore.close() 
+    }
+
+    "check that a value we didn't insert isn't there in JDBC-Row-Store" in {
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      assert(Await.result(jdbcStore.get("TestBrummelchen" :: 15 :: HNil)) === None)      
+      jdbcStore.close()      
+    }
+    
+    "put (UPDATE) another row into the JDBC-Row-Store" in {
+      // H2 doesn't allow to use the map feature, so we explicitly disable mapping
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      val key = "Test" :: 1 :: HNil
+      val value0 = "KEY" -> "Test"
+      val value1 = "BLUBBERWUBBER" -> 1
+      val value2 = "WURZ" -> "blubb"
+      Await.result(jdbcStore.put((key, Some(Row(Map(value0, value1, value2))))))
+      val value10 = "KEY" -> "Test"
+      val value11 = "BLUBBERWUBBER" -> 1
+      val value12 = "WURZ" -> "flupp"
+      Await.result(jdbcStore.put((key, Some(Row(Map(value10, value11, value12))))))
+      assert(Await.result(jdbcStore.get(key)) === Some(Row(Map(value10, value11, value12))))
+      internalDelete(jdbcStore)
+      jdbcStore.close()      
+    }
+
+    "put None (DELETE) into the JDBC-Row-Store" in {
+      // H2 doesn't allow to use the map feature, so we explicitly disable mapping
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      val key = "Test" :: 1 :: HNil
+      val value0 = "KEY" -> "Test"
+      val value1 = "BLUBBERWUBBER" -> 1
+      val value2 = "WURZ" -> "blubb"
+      Await.result(jdbcStore.put((key, Some(Row(Map(value0, value1, value2))))))
+      Await.result(jdbcStore.put((key, None)))
+      assert(Await.result(jdbcStore.get(key)) === None)
+      jdbcStore.close()      
+    }
+
+    "put a thousand rows into JDBC-Row-Store, check existence and iterate over these with getAll" in {
+      // H2 doesn't allow to use the map feature, so we explicitly disable mapping
+      val jdbcStore = new JDBCMultiKeyRowStore[KEY_TYPE, SERIALIZER_TYPE](sinleconn, "BLUBB", List("KEY", "BLUBBERWUBBER"), serializers, typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      val number = 1000 
+      (1 to number).map { i: Int =>
+        val key = s"Test$i" :: i :: HNil
+        val value0 = "KEY" -> s"Test$i"
+        val value1 = "BLUBBERWUBBER" -> i
+        val value2 = "WURZ" -> "flupp"
+        Await.result(jdbcStore.put((key, Some(Row(Map(value0, value1, value2))))))
+      }
+      // make sure all are in
+      val t00 = System.currentTimeMillis()
+      (1 to number).map { i: Int =>
+        val key = s"Test$i" :: i :: HNil
+        val result = Await.result(jdbcStore.get(key))
+        assert(result.isDefined && result.get.columns.get("KEY") == Some(s"Test$i"))
+      } 
+      println(System.currentTimeMillis() - t00)
+      // fetch all with a spool
+      @tailrec def iterateOverEntries(fsp: Future[Spool[(KEY_TYPE, Row)]], count: Int): Int = {
+        val sp = Await.result(fsp)
+        if(sp.isEmpty) {
+          count
+        } else {
+          println(sp.head)
+          iterateOverEntries(sp.tail, count + 1)
+        }
+      }
+      val t0 = System.currentTimeMillis()
+      assert(iterateOverEntries(jdbcStore.getAll, 0) === number)
+      println(System.currentTimeMillis() - t0)
+      jdbcStore.close()
+    }   
+  }
+  
   override def afterAll() {
     // watch all values by uncommenting this
     // org.h2.tools.Console.main("-url", "jdbc:h2:" + System.getProperty("user.home") + "/storehaus-jdbc/bla.db", "-driver", "org.h2.Driver", "-user", "user", "-password", "pass", "-web", "-browser", "-pg")    
