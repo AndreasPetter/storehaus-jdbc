@@ -14,32 +14,24 @@
 package org.scray.storehaus.jdbc
 
 import org.junit.runner.RunWith
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.WordSpec
+import org.scalatest.{BeforeAndAfterAll, WordSpec}
 import org.scalatest.junit.JUnitRunner
-import scalikejdbc.ConnectionPool
 import scalikejdbc._
-import scalikejdbc.scalikejdbcSQLInterpolationImplicitDef
 import scalikejdbc.config.DBs
-import org.scray.storehaus.jdbc.types.Row
-import com.twitter.util.Await
-import scalikejdbc.GlobalSettings
-import scalikejdbc.SQLFormatterSettings
-import scalikejdbc.LoggingSQLAndTimeSettings
 import com.typesafe.scalalogging.slf4j.LazyLogging
 import org.h2.tools.Server
-import scalikejdbc.ConnectionPoolContext
 import java.io.File
-import org.scray.storehaus.jdbc.types.JDBCToScalaTypesConfig
+import org.scray.storehaus.jdbc.types.{JDBCToScalaTypesConfig, Row}
 import scala.util.Random
-import com.twitter.util.Future
+import com.twitter.util.{Await, Future}
 import com.twitter.concurrent.Spool
 import scala.annotation.tailrec
 import shapeless._
-// import shapeless.ops.traversable._
 import shapeless.syntax.std.traversable._
 import shapeless.ops.traversable._
 import HandleComposites._
+import ch.qos.logback.classic.{Level, Logger}
+import org.slf4j.{Logger => SL4JLogger, LoggerFactory}
 
 /**
  * Tests for the JDBCRowStore
@@ -53,6 +45,8 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
   type SERIALIZER_TYPE = TypeBinder[String] :: TypeBinder[Int] :: HNil
   val serializers = implicitly[TypeBinder[String]] :: implicitly[TypeBinder[Int]] :: HNil
   
+  LoggerFactory.getLogger(SL4JLogger.ROOT_LOGGER_NAME).asInstanceOf[Logger].setLevel(Level.INFO)
+
   lazy val sinleconn = {
     ConnectionPool.singleton("jdbc:h2:" + System.getProperty("user.home") + "/storehaus-jdbc/bla.db", "user", "pass")
     ConnectionPool()
@@ -88,6 +82,16 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
     Await.result(store.put(("Test" :: 1 :: HNil, None)))
   }
 
+  @tailrec final def iterateOverEntries[T](fsp: Future[Spool[(T, Row)]], count: Int): Int = {
+    val sp = Await.result(fsp)
+    if(sp.isEmpty) {
+      count
+    } else {
+      iterateOverEntries(sp.tail, count + 1)
+    }
+  }
+
+  
   "Single key JDBC-Row-Store" should {
     
     "instantiate JDBC-Row-Store" in {
@@ -149,6 +153,7 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
     "put a thousand rows into JDBC-Row-Store, check existence and iterate over these with getAll" in {
       // H2 doesn't allow to use the map feature, so we explicitly disable mapping
       val jdbcStore = new JDBCRowStore[String](sinleconn, "BLA", typeMapping = Some(JDBCToScalaTypesConfig(None, true)))
+      val number = 1000
       (1 to 1000).map { i: Int =>
         val key = s"Test$i"
         val value0 = "KEY" -> key
@@ -163,19 +168,11 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
         val result = Await.result(jdbcStore.get(key))
         assert(result.isDefined && result.get.columns.get("KEY") == Some(s"Test$i"))
       } 
-      println(System.currentTimeMillis() - t00)
+      logger.info(s"Single-key Rowstore: Fetching $number entries by executing $number queries took ${(System.currentTimeMillis() - t00)} ms.")
       // fetch all with a spool
-      @tailrec def iterateOverEntries(fsp: Future[Spool[(String, Row)]], count: Int): Int = {
-        val sp = Await.result(fsp)
-        if(sp.isEmpty) {
-          count
-        } else {
-          iterateOverEntries(sp.tail, count + 1)
-        }
-      }
       val t0 = System.currentTimeMillis()
       assert(iterateOverEntries(jdbcStore.getAll, 0) === 1000)
-      println(System.currentTimeMillis() - t0)
+      logger.info(s"Single-key Rowstore: Iterating over $number entries took ${(System.currentTimeMillis() - t0)} ms.")
       jdbcStore.close()
     }
   }
@@ -256,20 +253,11 @@ class RowStoreSuite extends WordSpec with BeforeAndAfterAll with LazyLogging {
         val result = Await.result(jdbcStore.get(key))
         assert(result.isDefined && result.get.columns.get("KEY") == Some(s"Test$i"))
       } 
-      println(System.currentTimeMillis() - t00)
+      logger.info(s"Multi-key Rowstore: Fetching $number entries by executing $number queries took ${(System.currentTimeMillis() - t00)} ms.")
       // fetch all with a spool
-      @tailrec def iterateOverEntries(fsp: Future[Spool[(KEY_TYPE, Row)]], count: Int): Int = {
-        val sp = Await.result(fsp)
-        if(sp.isEmpty) {
-          count
-        } else {
-          println(sp.head)
-          iterateOverEntries(sp.tail, count + 1)
-        }
-      }
       val t0 = System.currentTimeMillis()
       assert(iterateOverEntries(jdbcStore.getAll, 0) === number)
-      println(System.currentTimeMillis() - t0)
+      logger.info(s"Multi-key Rowstore: Iterating over $number entries took ${(System.currentTimeMillis() - t0)} ms.")
       jdbcStore.close()
     }   
   }
