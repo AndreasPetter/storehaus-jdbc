@@ -5,7 +5,6 @@ import org.scray.storehaus.jdbc.HandleComposites.StatefulSelect
 import org.scray.storehaus.jdbc.types.JDBCToScalaTypes
 import org.scray.storehaus.jdbc.types.JDBCToScalaTypesConfig
 import org.scray.storehaus.jdbc.types.Row
-import org.scray.storehaus.jdbc.types.StorehausJDBCTypes
 import com.twitter.storehaus.IterableStore
 import com.twitter.storehaus.QueryableStore
 import com.twitter.storehaus.Store
